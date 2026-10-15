@@ -29,6 +29,20 @@ enum Commands {
         /// Port number
         port: u16,
     },
+
+    /// Check if a port is free. Exit 0 if free, 1 if taken.
+    Check {
+        /// Port number
+        port: u16,
+    },
+
+    /// Live-updating view, refreshes every 2 seconds
+     
+    Watch {
+    /// Refresh interval in seconds (default: 2)
+    #[arg(short, long, default_value = "2")]
+    interval: u64,
+    },
 }
 
 fn main() -> Result<()> {
@@ -38,6 +52,8 @@ fn main() -> Result<()> {
         Commands::List => list_listening()?,
         Commands::Who { port } => who(port)?,
         Commands::Kill { port } => kill(port)?,
+        Commands::Check { port } => check(port)?,
+        Commands::Watch { interval } => watch(interval)?,
     }
 
     Ok(())
@@ -271,5 +287,50 @@ fn truncate(s: &str, max: usize) -> String {
         let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
         out.push('…');
         out
+    }
+}
+
+fn check(port: u16) -> Result<()> {
+    let entries = scan()?;
+
+    match entries.iter().find(|e| e.port == port) {
+        Some(e) => {
+            println!(
+                "Port {} is in use by {} (PID {})",
+                port, e.process_name, e.pid
+            );
+            // Exit with code 1 without an "Error:" prefix
+            std::process::exit(1);
+        }
+        None => {
+            println!("Port {} is free", port);
+            Ok(())
+        }
+    }
+}
+
+fn watch(interval_secs: u64) -> Result<()> {
+    use std::thread;
+    use std::time::Duration;
+
+    loop {
+        // Clear screen and move cursor to top-left.
+        // ANSI escape codes — works in Windows Terminal, PowerShell 7+,
+        // and any modern terminal.
+        print!("\x1B[2J\x1B[H");
+
+        // Header
+        println!(
+            "{} {}  (every {}s, Ctrl+C to quit)\n",
+            "nportx watch".cyan().bold(),
+            format!("[{} listening]", listening_ports()?.len()).dimmed(),
+            interval_secs
+        );
+
+        // Table
+        list_listening()?;
+
+        io::stdout().flush().context("failed to flush stdout")?;
+        thread::sleep(Duration::from_secs(interval_secs));
     }
 }

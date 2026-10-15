@@ -1,4 +1,4 @@
-# nportx
+# NportX
 
 > Find and kill processes hogging your ports. Instantly. Cross-platform. Single binary.
 
