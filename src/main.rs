@@ -1,9 +1,10 @@
 mod scan;
 mod tui;
-// Assuming you have a kill.rs for your guards. If not, see note below.
+mod kill;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use kill::kill_pid;
 
 #[derive(Parser)]
 #[command(name = "nportx")]

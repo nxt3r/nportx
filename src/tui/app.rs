@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 use crate::scan::{scan_listening_ports, PortEntry};
+use crate::kill::{is_system_critical, kill_pid};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
@@ -34,7 +35,6 @@ impl App {
         match scan_listening_ports() {
             Ok(ports) => {
                 self.ports = ports;
-                // Clamp selection if the list shrinks
                 if self.selected >= self.ports.len() {
                     self.selected = self.ports.len().saturating_sub(1);
                 }
@@ -61,5 +61,28 @@ impl App {
                 self.selected - 1
             };
         }
+    }
+
+    pub fn begin_kill(&mut self) {
+        if let Some(p) = self.ports.get(self.selected) {
+            if is_system_critical(&p.process) {
+                self.status = format!("⛔ Refusing to kill critical process: {}", p.process);
+                return;
+            }
+            self.mode = Mode::ConfirmKill {
+                port: p.port,
+                pid: p.pid,
+                process: p.process.clone(),
+            };
+        }
+    }
+
+    pub fn confirm_kill(&mut self, port: u16, pid: u32, process: &str) {
+        match kill_pid(pid) {
+            Ok(_) => self.status = format!("✅ Killed {process} (PID {pid}) on port {port}"),
+            Err(e) => self.status = format!("❌ Kill failed: {e}"),
+        }
+        self.mode = Mode::Normal;
+        self.refresh_ports();
     }
 }

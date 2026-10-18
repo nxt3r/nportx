@@ -12,7 +12,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-pub use app::App;
+pub use app::{App, Mode};
 
 pub fn run(refresh_secs: u64) -> Result<()> {
     let original_hook = std::panic::take_hook();
@@ -57,12 +57,26 @@ fn run_loop(
         if event::poll(tick)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                        KeyCode::Down => app.next(),
-                        KeyCode::Up => app.prev(),
-                        _ => {}
-                    }
+                    // Inside run_loop, inside `if key.kind == KeyEventKind::Press {`
+match app.mode.clone() {
+    Mode::Normal => match key.code {
+        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+        KeyCode::Down => app.next(),
+        KeyCode::Up => app.prev(),
+        KeyCode::Char('k') => app.begin_kill(),
+        _ => {}
+    },
+    Mode::ConfirmKill { port, pid, process } => match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            app.confirm_kill(port, pid, &process);
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            app.mode = Mode::Normal;
+            app.status = "Kill cancelled".into();
+        }
+        _ => {}
+    },
+}
                 }
             }
         }
