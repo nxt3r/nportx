@@ -1,0 +1,79 @@
+mod app;
+mod ui;
+
+use std::io;
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{backend::CrosstermBackend, Terminal};
+
+pub use app::App;
+
+pub fn run(refresh_secs: u64) -> Result<()> {
+    // Panic safety: restore terminal even if we crash
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = restore_terminal();
+        original_hook(panic_info);
+    }));
+
+    let mut terminal = setup_terminal()?;
+    let result = run_loop(&mut terminal, refresh_secs);
+    restore_terminal()?;
+    result
+}
+
+fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let terminal = Terminal::new(backend)?;
+    Ok(terminal)
+}
+
+fn restore_terminal() -> Result<()> {
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen)?;
+    Ok(())
+}
+
+fn run_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    refresh_secs: u64,
+) -> Result<()> {
+    let mut app = App::new(Duration::from_secs(refresh_secs));
+    app.refresh_ports(); // initial load
+
+    let tick = Duration::from_millis(200); // input poll timeout
+
+    loop {
+        terminal.draw(|f| ui::draw(f, &app))?;
+
+        // Poll for input with timeout — this gives us "ticks"
+        if event::poll(tick)? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Auto-refresh check
+        if app.last_refresh.elapsed() >= app.refresh_interval {
+            app.refresh_ports();
+        }
+
+        if app.should_quit {
+            return Ok(());
+        }
+    }
+}

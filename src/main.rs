@@ -6,6 +6,7 @@ use netstat2::{
 use std::io::{self, Write};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 use colored::Colorize;
+mod tui;
 
 #[derive(Parser)]
 #[command(name = "nportx")]
@@ -53,7 +54,7 @@ fn main() -> Result<()> {
         Commands::Who { port } => who(port)?,
         Commands::Kill { port } => kill(port)?,
         Commands::Check { port } => check(port)?,
-        Commands::Watch { interval } => watch(interval)?,
+        Commands::Watch { interval } => tui::run(interval)?,
     }
 
     Ok(())
@@ -309,7 +310,7 @@ fn check(port: u16) -> Result<()> {
     }
 }
 
-fn watch(interval_secs: u64) -> Result<()> {
+fn watch_legacy(interval_secs: u64) -> Result<()> {
     use std::thread;
     use std::time::Duration;
 
