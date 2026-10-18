@@ -4,7 +4,6 @@ mod kill;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use kill::kill_pid;
 
 #[derive(Parser)]
 #[command(name = "nportx")]
@@ -16,15 +15,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// List all listening ports
     List,
-    /// Find who owns a port
     Who { port: u16 },
-    /// Kill a process on a port
     Kill { port: u16 },
-    /// Check if a port is free (0 = free, 1 = taken)
     Check { port: u16 },
-    /// Live-updating TUI view
     Watch {
         #[arg(short, long, default_value = "2")]
         interval: u64,
@@ -37,15 +31,13 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::List => {
             let ports = scan::scan_listening_ports()?;
-            // (Your existing list formatting here, or just print debug for now)
             for p in ports {
                 println!("Port: {} | PID: {} | Process: {}", p.port, p.pid, p.process);
             }
         }
-        Commands::Who { port } => { /* your existing logic */ }
-        Commands::Kill { port } => { /* your existing logic */ }
-        Commands::Check { port } => { /* your existing logic */ }
         Commands::Watch { interval } => tui::run(interval)?,
+        // ... your existing Who, Kill, Check logic ...
+        _ => {}
     }
 
     Ok(())

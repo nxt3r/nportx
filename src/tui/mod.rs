@@ -12,7 +12,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-pub use app::{App, Mode};
+pub use app::{App, Mode}; // Make sure Mode is exported for the loop
 
 pub fn run(refresh_secs: u64) -> Result<()> {
     let original_hook = std::panic::take_hook();
@@ -57,26 +57,52 @@ fn run_loop(
         if event::poll(tick)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    // Inside run_loop, inside `if key.kind == KeyEventKind::Press {`
-match app.mode.clone() {
-    Mode::Normal => match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-        KeyCode::Down => app.next(),
-        KeyCode::Up => app.prev(),
-        KeyCode::Char('k') => app.begin_kill(),
-        _ => {}
-    },
-    Mode::ConfirmKill { port, pid, process } => match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') => {
-            app.confirm_kill(port, pid, &process);
-        }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-            app.mode = Mode::Normal;
-            app.status = "Kill cancelled".into();
-        }
-        _ => {}
-    },
-}
+                    
+                    // 1. Prioritize Modal
+                    if let Mode::ConfirmKill { port, pid, process } = app.mode.clone() {
+                        match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') => app.confirm_kill(port, pid, &process),
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                app.mode = Mode::Normal;
+                                app.status = "Kill cancelled".into();
+                            }
+                            _ => {}
+                        }
+                        continue; // Skip rest of loop
+                    }
+
+                    // 2. Prioritize Search Input
+                    if app.searching {
+                        match key.code {
+                            KeyCode::Enter => { app.searching = false; } // Keep filter, stop typing
+                            KeyCode::Esc => { 
+                                app.searching = false; 
+                                app.search.clear(); // Clear filter completely
+                                app.clamp_selection();
+                            }
+                            KeyCode::Backspace => {
+                                app.search.pop();
+                                app.clamp_selection();
+                            }
+                            KeyCode::Char(c) => { 
+                                app.search.push(c); 
+                                app.clamp_selection();
+                            }
+                            _ => {}
+                        }
+                        continue; // Skip rest of loop
+                    }
+
+                    // 3. Normal Global Binds
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                        KeyCode::Down => app.next(),
+                        KeyCode::Up => app.prev(),
+                        KeyCode::Char('k') => app.begin_kill(),
+                        KeyCode::Char('r') => app.refresh_ports(),
+                        KeyCode::Char('/') => { app.searching = true; },
+                        _ => {}
+                    }
                 }
             }
         }

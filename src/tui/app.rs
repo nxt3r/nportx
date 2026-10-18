@@ -16,6 +16,8 @@ pub struct App {
     pub last_refresh: Instant,
     pub status: String,
     pub mode: Mode,
+    pub search: String,
+    pub searching: bool,
 }
 
 impl App {
@@ -28,6 +30,8 @@ impl App {
             last_refresh: Instant::now(),
             status: String::new(),
             mode: Mode::Normal,
+            search: String::new(),
+            searching: false,
         }
     }
 
@@ -35,9 +39,7 @@ impl App {
         match scan_listening_ports() {
             Ok(ports) => {
                 self.ports = ports;
-                if self.selected >= self.ports.len() {
-                    self.selected = self.ports.len().saturating_sub(1);
-                }
+                self.clamp_selection();
                 self.status = format!("{} listening ports", self.ports.len());
             }
             Err(e) => {
@@ -47,24 +49,43 @@ impl App {
         self.last_refresh = Instant::now();
     }
 
+    pub fn visible(&self) -> Vec<&PortEntry> {
+        if !self.search.is_empty() {
+            let query = self.search.to_lowercase();
+            self.ports.iter().filter(|p| {
+                p.process.to_lowercase().contains(&query) || p.port.to_string().contains(&query)
+            }).collect()
+        } else {
+            self.ports.iter().collect()
+        }
+    }
+
+    pub fn clamp_selection(&mut self) {
+        let len = self.visible().len();
+        if len == 0 {
+            self.selected = 0;
+        } else if self.selected >= len {
+            self.selected = len - 1;
+        }
+    }
+
     pub fn next(&mut self) {
-        if !self.ports.is_empty() {
-            self.selected = (self.selected + 1) % self.ports.len();
+        let len = self.visible().len();
+        if len > 0 {
+            self.selected = (self.selected + 1) % len;
         }
     }
 
     pub fn prev(&mut self) {
-        if !self.ports.is_empty() {
-            self.selected = if self.selected == 0 {
-                self.ports.len() - 1
-            } else {
-                self.selected - 1
-            };
+        let len = self.visible().len();
+        if len > 0 {
+            self.selected = if self.selected == 0 { len - 1 } else { self.selected - 1 };
         }
     }
 
     pub fn begin_kill(&mut self) {
-        if let Some(p) = self.ports.get(self.selected) {
+        let visible = self.visible();
+        if let Some(p) = visible.get(self.selected) {
             if is_system_critical(&p.process) {
                 self.status = format!("⛔ Refusing to kill critical process: {}", p.process);
                 return;

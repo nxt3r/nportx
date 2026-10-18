@@ -18,7 +18,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         .bottom_margin(0);
 
     let rows: Vec<Row> = app
-        .ports
+        .visible()
         .iter()
         .map(|p| {
             let color = if p.process.to_lowercase().contains("system")
@@ -56,8 +56,15 @@ pub fn draw(f: &mut Frame, app: &App) {
     state.select(Some(app.selected));
     f.render_stateful_widget(table, chunks[0], &mut state);
 
-    let footer = Paragraph::new(app.status.as_str());
-    f.render_widget(footer, chunks[1]);
+    // Draw Search bar if typing, otherwise draw normal footer
+    if app.searching {
+        let text = format!("/{}", app.search);
+        let footer = Paragraph::new(text).style(Style::default().bg(Color::Blue));
+        f.render_widget(footer, chunks[1]);
+    } else {
+        let footer = Paragraph::new(app.status.as_str());
+        f.render_widget(footer, chunks[1]);
+    }
 
     // Draw Modal
     if let Mode::ConfirmKill { port, pid, process } = &app.mode {
@@ -68,7 +75,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             .block(Block::default().title(" Confirm ").borders(Borders::ALL))
             .style(Style::default().bg(Color::DarkGray));
             
-        f.render_widget(Clear, area); // Clear background
+        f.render_widget(Clear, area);
         f.render_widget(modal, area);
     }
 }
