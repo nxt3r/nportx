@@ -2,7 +2,7 @@ mod app;
 mod ui;
 
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
@@ -15,7 +15,6 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 pub use app::App;
 
 pub fn run(refresh_secs: u64) -> Result<()> {
-    // Panic safety: restore terminal even if we crash
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = restore_terminal();
@@ -48,26 +47,26 @@ fn run_loop(
     refresh_secs: u64,
 ) -> Result<()> {
     let mut app = App::new(Duration::from_secs(refresh_secs));
-    app.refresh_ports(); // initial load
+    app.refresh_ports();
 
-    let tick = Duration::from_millis(200); // input poll timeout
+    let tick = Duration::from_millis(200);
 
     loop {
         terminal.draw(|f| ui::draw(f, &app))?;
 
-        // Poll for input with timeout — this gives us "ticks"
         if event::poll(tick)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                        KeyCode::Down => app.next(),
+                        KeyCode::Up => app.prev(),
                         _ => {}
                     }
                 }
             }
         }
 
-        // Auto-refresh check
         if app.last_refresh.elapsed() >= app.refresh_interval {
             app.refresh_ports();
         }

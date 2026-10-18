@@ -1,13 +1,10 @@
 use std::time::{Duration, Instant};
+use crate::scan::{scan_listening_ports, PortEntry};
 
-use anyhow::Result;
-
-#[derive(Debug, Clone)]
-pub struct PortEntry {
-    pub port: u16,
-    pub pid: u32,
-    pub process: String,
-    pub memory_bytes: u64,
+#[derive(Debug, Clone, PartialEq)]
+pub enum Mode {
+    Normal,
+    ConfirmKill { port: u16, pid: u32, process: String },
 }
 
 pub struct App {
@@ -17,6 +14,7 @@ pub struct App {
     pub refresh_interval: Duration,
     pub last_refresh: Instant,
     pub status: String,
+    pub mode: Mode,
 }
 
 impl App {
@@ -28,12 +26,40 @@ impl App {
             refresh_interval,
             last_refresh: Instant::now(),
             status: String::new(),
+            mode: Mode::Normal,
         }
     }
 
     pub fn refresh_ports(&mut self) {
-        // Stage 1: stub. Stage 2: wire in your real netstat2/sysinfo scan.
+        match scan_listening_ports() {
+            Ok(ports) => {
+                self.ports = ports;
+                // Clamp selection if the list shrinks
+                if self.selected >= self.ports.len() {
+                    self.selected = self.ports.len().saturating_sub(1);
+                }
+                self.status = format!("{} listening ports", self.ports.len());
+            }
+            Err(e) => {
+                self.status = format!("Scan error: {e}");
+            }
+        }
         self.last_refresh = Instant::now();
-        self.status = format!("Loaded {} ports", self.ports.len());
+    }
+
+    pub fn next(&mut self) {
+        if !self.ports.is_empty() {
+            self.selected = (self.selected + 1) % self.ports.len();
+        }
+    }
+
+    pub fn prev(&mut self) {
+        if !self.ports.is_empty() {
+            self.selected = if self.selected == 0 {
+                self.ports.len() - 1
+            } else {
+                self.selected - 1
+            };
+        }
     }
 }
