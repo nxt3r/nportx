@@ -66,6 +66,7 @@ Scoop handles PATH configuration, updates, and uninstallation automatically.
 To upgrade later:
 
 ```powershell
+scoop update
 scoop update nportx
 ```
 
