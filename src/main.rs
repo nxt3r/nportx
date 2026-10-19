@@ -1,10 +1,10 @@
+mod completions;
+mod detect;
 mod kill;
 mod scan;
 mod tui;
-mod completions;
-mod detect;
 
-use anyhow::{Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -16,6 +16,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
+
 #[derive(Subcommand)]
 enum Commands {
     /// List all listening TCP ports
@@ -49,7 +50,7 @@ enum Commands {
         #[arg(short, long, default_value = "2")]
         interval: u64,
     },
-        /// Generate shell completions
+    /// Generate shell completions
     Completions {
         /// Shell to generate completions for
         #[arg(value_enum)]
@@ -74,12 +75,38 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::List => {
+                        Commands::List => {
+            use colored::Colorize;
+
             let ports = scan::scan_listening_ports()?;
+            if ports.is_empty() {
+                println!("No listening TCP ports found.");
+                return Ok(());
+            }
+
+            // Header: PORT, PROCESS, PID, MEMORY
+            println!(
+                "{:<6} {:<30} {:<8} {}",
+                "PORT".bold().underline(),
+                "PROCESS".bold().underline(),
+                "PID".bold().underline(),
+                "MEMORY".bold().underline()
+            );
+            println!("{}", "─".repeat(65).bright_black());
+
             for p in ports {
+                let process_colored = if p.process.contains("[docker]") {
+                    p.process.magenta()
+                } else {
+                    p.process.white()
+                };
+
                 println!(
-                    "Port: {} | PID: {} | Process: {}",
-                    p.port, p.pid, p.process
+                    "{:<6} {:<30} {:<8} {}",
+                    p.port.to_string().bright_cyan(),
+                    process_colored,
+                    p.pid.to_string().yellow(),
+                    format_memory(p.memory_bytes).green()
                 );
             }
         }
@@ -179,4 +206,19 @@ fn run_doctor() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn format_memory(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
 }

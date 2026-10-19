@@ -1,5 +1,6 @@
 use anyhow::Result;
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo};
+use std::collections::HashMap;
 use sysinfo::{Pid, System};
 
 #[derive(Debug, Clone)]
@@ -10,6 +11,45 @@ pub struct PortEntry {
     pub memory_bytes: u64,
 }
 
+/// Returns a map of (port -> container_name) for running Docker containers.
+fn get_docker_containers() -> HashMap<u16, String> {
+    let mut map = HashMap::new();
+
+    // We use std::process::Command to ask Docker for its running containers.
+    let mut cmd = std::process::Command::new("docker");
+    cmd.args(["ps", "--format", "{{.Names}} {{.Ports}}"]);
+
+    // On Windows, prevent a console window from flashing up
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    // If docker isn't installed or the daemon isn't running, this quietly fails and returns empty.
+    if let Ok(output) = cmd.output() {
+        if let Ok(stdout) = String::from_utf8(output.stdout) {
+            for line in stdout.lines() {
+                // Format: "my-postgres 0.0.0.0:5432->5432/tcp"
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let name = parts[0];
+                    // Find the host port (the number before the ->)
+                    if let Some(host_port_str) = parts[1].split("->").next() {
+                        // Split by ':' to get the port at the end
+                        if let Some(port_str) = host_port_str.split(':').last() {
+                            if let Ok(port) = port_str.parse::<u16>() {
+                                map.insert(port, format!("[docker] {}", name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
 pub fn scan_listening_ports() -> Result<Vec<PortEntry>> {
     let mut ports = Vec::new();
 
@@ -17,7 +57,10 @@ pub fn scan_listening_ports() -> Result<Vec<PortEntry>> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
-    // 2. Get sockets (adjust flags based on your OS if needed)
+    // 2. Get Docker container mappings (fails silently if no Docker)
+    let docker_map = get_docker_containers();
+
+    // 3. Get sockets (adjust flags based on your OS if needed)
     let af_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
     let proto_flags = ProtocolFlags::TCP;
     let sockets = get_sockets_info(af_flags, proto_flags)?;
@@ -35,10 +78,17 @@ pub fn scan_listening_ports() -> Result<Vec<PortEntry>> {
                     continue; // Skip PID 0
                 }
 
-                let process_name = sys
+                let mut process_name = sys
                     .process(Pid::from_u32(pid))
                     .map(|p| p.name().to_string_lossy().into_owned())
                     .unwrap_or_else(|| "<unknown>".to_string());
+
+                // Override with Docker container name if applicable
+                if process_name.to_lowercase().contains("docker") {
+                    if let Some(container_name) = docker_map.get(&tcp_info.local_port) {
+                        process_name = container_name.clone();
+                    }
+                }
 
                 let memory = sys.process(Pid::from_u32(pid)).map(|p| p.memory()).unwrap_or(0);
 
