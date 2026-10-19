@@ -98,11 +98,13 @@ cargo install nportx
 ## Usage
 
 ```bash
-nportx watch       # Open the interactive TUI
-nportx list        # Show all listening TCP ports
-nportx who 3000    # Find the process using port 3000
-nportx kill 3000   # Kill the process using port 3000 (with confirmation)
-nportx check 3000  # Exit 0 if free, 1 if taken — for scripts
+nportx watch                 # Open the interactive TUI
+nportx list                  # Show all listening TCP ports
+nportx who 3000              # Find the process using port 3000
+nportx kill 3000             # Kill the process using port 3000 (with confirmation)
+nportx kill 3000 -f          # Skips prompt (for scripts)
+nportx kill 3000 --force     # Same as -f
+nportx check 3000            # Exit 0 if free, 1 if taken — for scripts
 ```
 
 **Note:** The commands accept a port number, not a process ID (PID).

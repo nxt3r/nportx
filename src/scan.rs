@@ -12,7 +12,7 @@ pub struct PortEntry {
 
 pub fn scan_listening_ports() -> Result<Vec<PortEntry>> {
     let mut ports = Vec::new();
-    
+
     // 1. Initialize sysinfo to get process names and memory
     let mut sys = System::new_all();
     sys.refresh_all();
@@ -28,20 +28,19 @@ pub fn scan_listening_ports() -> Result<Vec<PortEntry>> {
             if !tcp_info.state.eq(&netstat2::TcpState::Listen) {
                 continue;
             }
-            
+
             // Get PIDs associated with this socket
             for pid in socket.associated_pids {
                 if pid == 0 {
                     continue; // Skip PID 0
                 }
 
-                let process_name = sys.process(Pid::from_u32(pid))
+                let process_name = sys
+                    .process(Pid::from_u32(pid))
                     .map(|p| p.name().to_string_lossy().into_owned())
                     .unwrap_or_else(|| "<unknown>".to_string());
 
-                let memory = sys.process(Pid::from_u32(pid))
-                    .map(|p| p.memory())
-                    .unwrap_or(0);
+                let memory = sys.process(Pid::from_u32(pid)).map(|p| p.memory()).unwrap_or(0);
 
                 // Deduplicate ports
                 if !ports.iter().any(|p: &PortEntry| p.port == tcp_info.local_port) {
@@ -59,4 +58,11 @@ pub fn scan_listening_ports() -> Result<Vec<PortEntry>> {
     // Sort by port number for consistency
     ports.sort_by_key(|p| p.port);
     Ok(ports)
+}
+
+/// Find the process listening on a specific port.
+/// Returns `Ok(None)` if the port is free.
+pub fn find_port(port: u16) -> Result<Option<PortEntry>> {
+    let all = scan_listening_ports()?;
+    Ok(all.into_iter().find(|p| p.port == port))
 }
