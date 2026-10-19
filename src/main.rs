@@ -2,6 +2,7 @@ mod kill;
 mod scan;
 mod tui;
 mod completions;
+mod detect;
 
 use anyhow::{Result};
 use clap::{Parser, Subcommand};
@@ -49,6 +50,8 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+        /// Detect expected ports for the current project and cross-check them
+    Doctor,
 }
 
 fn main() -> Result<()> {
@@ -87,8 +90,75 @@ fn main() -> Result<()> {
             }
         }
         Commands::Watch { interval } => tui::run(interval)?,
+        Commands::Doctor => {
+            run_doctor()?;
+        }
         Commands::Completions { shell } => {
             completions::generate_completions(shell)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_doctor() -> Result<()> {
+    use colored::Colorize;
+
+    let cwd = std::env::current_dir()?;
+    let expected = detect::detect_expected_ports(&cwd)?;
+
+    if expected.is_empty() {
+        println!(
+            "{} No project port configuration detected.",
+            "ℹ️ ".bright_blue()
+        );
+        println!(
+            "  Looked for .env, .env.local, .env.development, and package.json in {}",
+            cwd.display()
+        );
+        println!("  Run `nportx list` to see all listening ports.");
+        return Ok(());
+    }
+
+    let listening = scan::scan_listening_ports()?;
+
+    println!(
+        "{} {} expected port(s) in {}\n",
+        "🔍".to_string(),
+        expected.len(),
+        cwd.display()
+    );
+
+    println!(
+        "{:<6}  {:<10}  {:<40}  {}",
+        "PORT".bold(),
+        "STATUS".bold(),
+        "EXPECTED BY".bold(),
+        "PROCESS".bold()
+    );
+    println!("{}", "─".repeat(90).bright_black());
+
+    for exp in &expected {
+        let hit = listening.iter().find(|p| p.port == exp.port);
+        match hit {
+            Some(p) => {
+                println!(
+                    "{:<6}  {:<10}  {:<40}  {}",
+                    exp.port,
+                    "✅ listening".bright_green(),
+                    exp.source,
+                    format!("{} (PID {})", p.process, p.pid).bright_green()
+                );
+            }
+            None => {
+                println!(
+                    "{:<6}  {:<10}  {:<40}  {}",
+                    exp.port,
+                    "❌ free".bright_red(),
+                    exp.source,
+                    "—".bright_black()
+                );
+            }
         }
     }
 
