@@ -1,6 +1,7 @@
 mod kill;
 mod scan;
 mod tui;
+mod completions;
 
 use anyhow::{Result};
 use clap::{Parser, Subcommand};
@@ -42,6 +43,12 @@ enum Commands {
         #[arg(short, long, default_value = "2")]
         interval: u64,
     },
+        /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 fn main() -> Result<()> {
@@ -80,6 +87,9 @@ fn main() -> Result<()> {
             }
         }
         Commands::Watch { interval } => tui::run(interval)?,
+        Commands::Completions { shell } => {
+            completions::generate_completions(shell)?;
+        }
     }
 
     Ok(())
