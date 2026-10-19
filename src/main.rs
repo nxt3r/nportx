@@ -26,6 +26,11 @@ enum Commands {
         port: u16,
     },
     /// Kill the process listening on a port
+    #[command(after_help = "\
+ Examples:
+  nportx kill 3000          # prompts [y/N] before killing
+  nportx kill 3000 -f       # skips prompt (for scripts/CI)
+  nportx kill 3000 --force  # same as -f")]
     Kill {
         /// Port number to kill
         port: u16,
@@ -50,7 +55,18 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
-        /// Detect expected ports for the current project and cross-check them
+    /// Detect expected ports for the current project and cross-check them
+    #[command(after_help = "\
+Reads .env, .env.local, .env.development, and package.json in the current directory.
+
+Examples:
+  cd my-vite-app
+  nportx doctor             # shows expected ports vs. what's actually listening
+
+Supported sources:
+  - .env / .env.local / .env.development  (any VAR ending in PORT)
+  - package.json scripts.start / scripts.dev  (-p, --port, --port=)
+  - Framework defaults: Vite=5173, Next.js=3000, CRA=3000, Nuxt=3000, Gatsby=8000")]
     Doctor,
 }
 
