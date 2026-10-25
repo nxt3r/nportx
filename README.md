@@ -36,6 +36,8 @@
 | Scripting exit codes | ❌ | ❌ | ✅ |
 | Interactive TUI | ❌ | ❌ | ✅ |
 | Project-aware detection | ❌ | ❌ | ✅ |
+| UDP support | ❌ | ✅ | ✅ |
+| Export to JSON/CSV | ❌ | ❌ | ✅ |
 | No runtime dependencies | ✅ | ✅ | ✅ |
 | Instant Startup | ✅ | ✅ | ✅ |
 
@@ -117,11 +119,16 @@ cargo install nportx
 ```bash
 nportx watch                 # Open the interactive TUI
 nportx list                  # Show all listening TCP ports (with Docker awareness)
+nportx list --udp            # Show TCP and UDP ports (with PROTO column)
 nportx who 3000              # Find the process using port 3000
 nportx kill 3000             # Kill the process using port 3000 (with confirmation)
 nportx kill 3000 -f          # Skips prompt (for scripts)
+nportx kill --name 'x'       # Kill all processes named "x" (asks for confirmation)
 nportx doctor                # Detect expected project ports and cross-check them
 nportx check 3000            # Exit 0 if free, 1 if taken — for scripts
+nportx export json           # Export listening ports to JSON
+nportx export csv            # Export listening ports to CSV
+nportx free 3000             # Find the next available free port starting from 3000
 nportx completions bash      # Generate shell completions (bash, zsh, fish, powershell)
 ```
 
@@ -152,21 +159,23 @@ List listening ports:
 ```text
 $ nportx list
 
-PORT   PROCESS                        PID      MEMORY
------------------------------------------------------------------
-135    svchost.exe                    1072     12.4 MB
-903    vmware-authd.exe               3832     8.1 MB
-28451  nportx.exe                     3776     1.5 MB
-49690  explorer.exe                   6408     252.1 MB
-5432   [docker] my-postgres-db        3204     89.2 MB
+ PORT       PID  PROCESS                            MEMORY
+────────────────────────────────────────────────────────────
+  135      1072  svchost.exe                          0 B
+  903      3836  fixtional.exe                        0 B
+28451      3724  nportx.exe                           0 B
+26796      9792  Code.exe                         362.5 MB
+42050     12292  OneDrive.Sync.Service.exe         20.7 MB
+49690      6408  explorer.exe                     312.5 MB
+ 5432      3204  [docker] my-postgres-db           89.2 MB
 ```
 
 Find the process using a port:
 
 ```text
-$ nportx who 49690
+$ nportx who 3000
 
-Port 49690 is held by PID 6408 (explorer.exe, 252 MB)
+Port 3000 is owned by node.exe (PID 8460)
 ```
 
 Terminate the process:
@@ -174,10 +183,38 @@ Terminate the process:
 ```text
 $ nportx kill 49690
 
-About to kill: explorer.exe (PID 6408) on port 49690
-Are you sure? [y/N] y
+Kill process explorer.exe (PID 6408) on port 49690? [y/N] y
+Killed explorer.exe (PID 6408) on port 49690.
+```
 
-✅ Killed explorer.exe (PID 6408) — port 49690 is now free.
+Kill by process name:
+
+```text
+$ nportx kill --name node
+
+Found 2 process(es) matching 'node':
+  - node.exe (PID 8460) on port 3000
+  - node.exe (PID 11204) on port 5173
+Kill all 2 process(es)? [y/N] y
+Killed node.exe (PID 8460) on port 3000.
+Killed node.exe (PID 11204) on port 5173.
+
+Done. Successfully killed 2 process(es).
+```
+
+Export to JSON:
+
+```bash
+nportx export json > ports.json
+nportx export csv > ports.csv
+```
+
+Find the next free port:
+
+```text
+$ nportx free 3000
+
+Port 3000 is taken. Next free port is 3001.
 ```
 
 Project-aware detection:
@@ -185,12 +222,13 @@ Project-aware detection:
 ```text
 $ nportx doctor
 
-🔍 2 expected port(s) in C:\Projects\my-vite-app
+🔍 3 expected port(s) in C:\Projects\my-vite-app
 
 PORT    STATUS      EXPECTED BY                              PROCESS
 ------------------------------------------------------------------------------------------
 3000    ✅ listening package.json (scripts.dev)              node.exe (PID 8460)
-5173    ❌ free      Vite default                             —
+5173    ✅ listening Vite default                             node.exe (PID 11204)
+5432    ❌ free      docker-compose.yml (service: db)         —
 ```
 
 ### Use It in Scripts
@@ -211,6 +249,13 @@ dev:
 	npm run dev
 ```
 
+Find an open port dynamically:
+
+```bash
+PORT=$(nportx free 3000 | grep -oE '[0-9]+$')
+npm run dev -- --port $PORT
+```
+
 The `check` command returns:
 
 - `0` if the port is free.
@@ -218,41 +263,47 @@ The `check` command returns:
 
 ## Features
 
-- ⚡ Instant startup — Written in Rust with no runtime dependencies.
-- 🌍 Cross-platform — Windows, macOS (Intel/ARM), and Linux (x86_64/ARM64).
-- 🖥️ Interactive TUI — Live-updating table, keyboard navigation, and in-app process termination.
-- 🩺 Project-Aware — `nportx doctor` reads your `.env` and `package.json` to detect port conflicts.
-- 🐳 Docker Aware — Replaces `docker-proxy` with the actual container name.
-- 🎨 Color-coded output — System processes in red, user processes in green, Docker containers in magenta.
-- 🔍 Instant search — Filter by port or process name in the TUI.
-- 🛡️ Safety guard — Refuses to terminate critical processes such as `System`, `lsass.exe`, and `csrss.exe`.
-- 🧪 Scriptable — Predictable exit codes and `--force` flags for automated workflows.
+- ⚡ **Instant startup** — Written in Rust with no runtime dependencies.
+- 🌍 **Cross-platform** — Windows, macOS (Intel/ARM), and Linux (x86_64/ARM64).
+- 🖥️ **Interactive TUI** — Live-updating table, keyboard navigation, and in-app process termination.
+- 🩺 **Project-Aware** — `nportx doctor` reads your `.env`, `package.json`, and `docker-compose.yml` to detect port conflicts.
+- 🐳 **Docker Aware** — Replaces docker-proxy with the actual container name.
+- 🎨 **Color-coded output** — System processes in red, user processes in green, Docker containers in magenta.
+- 🔍 **Instant search** — Filter by port or process name in the TUI.
+- 📦 **Exportable** — Dump the port list to JSON or CSV for dashboards and logging.
+- 🔌 **UDP Support** — Scan both TCP and UDP sockets with a single flag.
+- 🎯 **Next Free Port** — Instantly find the next available port starting from a given number.
+- 🛡️ **Safety guard** — Refuses to terminate critical processes such as System, lsass.exe, and csrss.exe.
+- 🧪 **Scriptable** — Predictable exit codes, `--force` flags, and JSON/CSV output for automated workflows.
 
 ## Roadmap
 
 ### Completed
 
-- [x] `list`, `who`, `kill`, `check`, and `watch` commands
-- [x] Interactive TUI (`nportx watch`)
-- [x] Scoop distribution for Windows
-- [x] Homebrew tap for macOS
-- [x] Pre-built binaries for macOS and Linux
-- [x] One-line installation script for Unix-like systems
-- [x] `kill --force` — Skip confirmation
-- [x] Shell completions for Bash, Zsh, Fish, and PowerShell
-- [x] Project-aware port detection (`.env`, `package.json`, framework defaults)
-- [x] Docker container awareness
+- ☑ list, who, kill, check, and watch commands
+- ☑ Interactive TUI (`nportx watch`)
+- ☑ Scoop distribution for Windows
+- ☑ Homebrew tap for macOS
+- ☑ Pre-built binaries for macOS and Linux
+- ☑ One-line installation script for Unix-like systems
+- ☑ `kill --force` — Skip confirmation
+- ☑ Shell completions for Bash, Zsh, Fish, and PowerShell
+- ☑ Project-aware port detection (`.env`, `package.json`, framework defaults)
+- ☑ Docker container awareness
+- ☑ `docker-compose.yml` Detection (host ports for multi-container apps)
+- ☑ `kill --name` — Kill all listening ports owned by a specific process name
+- ☑ `export` — Output the port list as JSON or CSV
+- ☑ `free` — Find the next available free port starting from a given number
+- ☑ UDP Support — `--udp` flag to scan TCP + UDP sockets
 
 ### Planned
 
-- [ ] **`docker-compose.yml` Detection:** Expand `nportx doctor` to read YAML files and detect expected ports for multi-container apps.
-- [ ] **`nportx kill --all`:** Kill all listening ports owned by a specific process name (e.g., `nportx kill --name node`).
-- [ ] **`nportx export`:** Output the port list as JSON or CSV for dashboards and logging.
-- [ ] **`nportx free` (or `nportx nuke`):** A single command that finds every free port starting from a given number (e.g., `nportx free 3000` prints 3001 if 3000 is taken).
-- [ ] **UDP Support:** Currently, NportX only scans TCP. Add an `--udp` flag to scan UDP sockets.
-- [ ] **Linux apt/dnf repos:** Native package manager distribution for Debian/Ubuntu and Fedora.
-- [ ] **Windows winget support:** Submit the release to the official Windows Package Manager repository.
-- [ ] **VSCode Extension:** A tiny extension that runs `nportx doctor` in the background and warns you if a port conflict is detected before you run your code.
+- □ `nportx wait <port>`: Block execution until a port is free. Perfect for scripts that need to wait for a previous process to fully release the port before starting.
+- □ `nportx stats`: A live dashboard showing top memory hogs, total listening ports, and historical port usage (like htop for ports).
+- □ Linux apt/dnf repos: Native package manager distribution for Debian/Ubuntu and Fedora.
+- □ Windows winget support: Submit the release to the official Windows Package Manager repository.
+- □ VSCode Extension: A tiny extension that runs nportx doctor in the background and warns you if a port conflict is detected before you run your code.
+- □ `nportx kill --interactive`: A guided wizard to pick and choose which processes to kill from a list (like git add -p but for processes).
 
 ## Contributing
 

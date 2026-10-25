@@ -25,8 +25,12 @@ pub enum ExportFormat {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// List all listening TCP ports
-    List,
+    /// List all listening ports
+    List {
+        /// Include UDP sockets (shows a PROTO column)
+        #[arg(long)]
+        udp: bool,
+    },
     /// Show the process owning a specific port
     Who {
         /// Port number to inspect
@@ -87,6 +91,15 @@ Supported sources:
         /// Output format
         #[arg(value_enum)]
         format: ExportFormat,
+
+        /// Include UDP sockets
+        #[arg(long)]
+        udp: bool,
+    },
+    /// Find the next available free port starting from a given number
+    Free {
+        /// Port number to start searching from
+        start_port: u16,
     },
 }
 
@@ -94,57 +107,67 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::List => {
+        Commands::List { udp } => {
             use colored::Colorize;
             use colored::control;
 
-            // Force colored to output ANSI codes even if it thinks the terminal doesn't support it
             control::set_override(true);
 
-            let ports = scan::scan_listening_ports()?;
+            let ports = scan::scan_ports(udp)?;
             if ports.is_empty() {
-                println!("No listening TCP ports found.");
+                println!("No listening ports found.");
                 return Ok(());
             }
 
-            // Header: PORT, PID, PROCESS, MEMORY
-            println!(
-                "{:>6}  {:>8}  {:<30}  {:>10}",
-                "PORT".bold(),
-                "PID".bold(),
-                "PROCESS".bold(),
-                "MEMORY".bold()
-            );
-            println!("{}", "─".repeat(60).bright_black());
+            if udp {
+                // With PROTO column
+                println!(
+                    "{:>6}  {:<5}  {:>8}  {:<30}  {:>10}",
+                    "PORT".bold(),
+                    "PROTO".bold(),
+                    "PID".bold(),
+                    "PROCESS".bold(),
+                    "MEMORY".bold()
+                );
+                println!("{}", "─".repeat(67).bright_black());
 
-            for p in ports {
-                // 1. Process Colors
-                let process_colored = if p.process.contains("[docker]") {
-                    p.process.magenta()
-                } else if kill::is_system_critical(&p.process) {
-                    p.process.red()
-                } else {
-                    p.process.green() // "Safe to kill" vibe
-                };
+                for p in ports {
+                    let process_colored = color_process(&p.process);
+                    let mem_colored = color_memory(p.memory_bytes);
+                    let proto_colored = match p.protocol {
+                        scan::Protocol::Tcp => "TCP".cyan(),
+                        scan::Protocol::Udp => "UDP".magenta(),
+                    };
 
-                // 2. Memory Colors (Contrast)
-                const FIFTY_MB: u64 = 50 * 1024 * 1024;
-                let mem_colored = if p.memory_bytes == 0 {
-                    "0 B".bright_black()
-                } else if p.memory_bytes > FIFTY_MB {
-                    format_memory(p.memory_bytes).bright_green().bold() // Big memory pops
-                } else {
-                    format_memory(p.memory_bytes).white() // Small memory is neutral
-                };
-
-                // 3. Print Row
+                    println!(
+                        "{:>6}  {:<5}  {:>8}  {:<30}  {:>10}",
+                        p.port.to_string().cyan(),
+                        proto_colored,
+                        p.pid.to_string().yellow(),
+                        process_colored,
+                        mem_colored
+                    );
+                }
+            } else {
+                // Classic layout (TCP only, no PROTO column)
                 println!(
                     "{:>6}  {:>8}  {:<30}  {:>10}",
-                    p.port.to_string().cyan(), // Standard cyan
-                    p.pid.to_string().yellow(),
-                    process_colored,
-                    mem_colored
+                    "PORT".bold(),
+                    "PID".bold(),
+                    "PROCESS".bold(),
+                    "MEMORY".bold()
                 );
+                println!("{}", "─".repeat(60).bright_black());
+
+                for p in ports {
+                    println!(
+                        "{:>6}  {:>8}  {:<30}  {:>10}",
+                        p.port.to_string().cyan(),
+                        p.pid.to_string().yellow(),
+                        color_process(&p.process),
+                        color_memory(p.memory_bytes)
+                    );
+                }
             }
         }
         Commands::Who { port } => match scan::find_port(port)? {
@@ -176,11 +199,10 @@ fn main() -> Result<()> {
         Commands::Completions { shell } => {
             completions::generate_completions(shell)?;
         }
-        Commands::Export { format } => {
-            let ports = scan::scan_listening_ports()?;
+        Commands::Export { format, udp } => {
+            let ports = scan::scan_ports(udp)?;
             if ports.is_empty() {
-                // In a script, empty output is better than an error message
-                return Ok(()); 
+                return Ok(());
             }
 
             match format {
@@ -189,12 +211,17 @@ fn main() -> Result<()> {
                 }
                 ExportFormat::Csv => {
                     let mut wtr = csv::Writer::from_writer(std::io::stdout());
-                    // Write the header first
-                    wtr.write_record(&["port", "pid", "process", "memory_bytes"])?;
-                    // Then loop through the data
+                    wtr.write_record(&[
+                        "port",
+                        "protocol",
+                        "pid",
+                        "process",
+                        "memory_bytes",
+                    ])?;
                     for p in &ports {
                         wtr.write_record(&[
                             p.port.to_string(),
+                            p.protocol.to_string(),
                             p.pid.to_string(),
                             p.process.clone(),
                             p.memory_bytes.to_string(),
@@ -204,9 +231,69 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Free { start_port } => {
+            use colored::Colorize;
+
+            let ports = scan::scan_listening_ports()?;
+
+            let start_taken = ports.iter().any(|p| p.port == start_port);
+            if !start_taken {
+                println!(
+                    "Port {} is free.",
+                    start_port.to_string().bright_green().bold()
+                );
+                return Ok(());
+            }
+
+            let mut found_port = None;
+            for candidate in (start_port + 1)..=65535 {
+                if !ports.iter().any(|p| p.port == candidate) {
+                    found_port = Some(candidate);
+                    break;
+                }
+            }
+
+            match found_port {
+                Some(free_port) => {
+                    println!(
+                        "Port {} is taken. Next free port is {}.",
+                        start_port.to_string().red(),
+                        free_port.to_string().bright_green().bold()
+                    );
+                }
+                None => {
+                    println!("No free ports found above {}.", start_port);
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+/// Shared color logic for process names in `list`
+fn color_process(name: &str) -> colored::ColoredString {
+    use colored::Colorize;
+    if name.contains("[docker]") {
+        name.magenta()
+    } else if kill::is_system_critical(name) {
+        name.red()
+    } else {
+        name.green()
+    }
+}
+
+/// Shared color logic for memory column in `list`
+fn color_memory(bytes: u64) -> colored::ColoredString {
+    use colored::Colorize;
+    const FIFTY_MB: u64 = 50 * 1024 * 1024;
+    if bytes == 0 {
+        "0 B".bright_black()
+    } else if bytes > FIFTY_MB {
+        format_memory(bytes).bright_green().bold()
+    } else {
+        format_memory(bytes).white()
+    }
 }
 
 fn run_doctor() -> Result<()> {
