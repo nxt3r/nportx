@@ -17,6 +17,12 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum ExportFormat {
+    Json,
+    Csv,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// List all listening TCP ports
@@ -26,15 +32,21 @@ enum Commands {
         /// Port number to inspect
         port: u16,
     },
-    /// Kill the process listening on a port
+    /// Kill the process listening on a port, or by process name
     #[command(after_help = "\
  Examples:
-  nportx kill 3000          # prompts [y/N] before killing
+  nportx kill 3000          # prompts [y/N] before killing port 3000
   nportx kill 3000 -f       # skips prompt (for scripts/CI)
-  nportx kill 3000 --force  # same as -f")]
+  nportx kill --name node   # kills all ports owned by 'node'
+  nportx kill --name node -f")]
     Kill {
         /// Port number to kill
-        port: u16,
+        #[arg(conflicts_with = "name")]
+        port: Option<u16>,
+
+        /// Process name to kill (e.g., 'node', 'python')
+        #[arg(short, long)]
+        name: Option<String>,
 
         /// Skip the confirmation prompt (useful for scripts)
         #[arg(short, long)]
@@ -58,7 +70,7 @@ enum Commands {
     },
     /// Detect expected ports for the current project and cross-check them
     #[command(after_help = "\
-Reads .env, .env.local, .env.development, and package.json in the current directory.
+Reads .env, .env.local, .env.development, package.json, and docker-compose.yml.
 
 Examples:
   cd my-vite-app
@@ -67,16 +79,27 @@ Examples:
 Supported sources:
   - .env / .env.local / .env.development  (any VAR ending in PORT)
   - package.json scripts.start / scripts.dev  (-p, --port, --port=)
+  - docker-compose.yml / .yaml  (host ports)
   - Framework defaults: Vite=5173, Next.js=3000, CRA=3000, Nuxt=3000, Gatsby=8000")]
     Doctor,
+    /// Export listening ports to JSON or CSV
+    Export {
+        /// Output format
+        #[arg(value_enum)]
+        format: ExportFormat,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-                        Commands::List => {
+        Commands::List => {
             use colored::Colorize;
+            use colored::control;
+
+            // Force colored to output ANSI codes even if it thinks the terminal doesn't support it
+            control::set_override(true);
 
             let ports = scan::scan_listening_ports()?;
             if ports.is_empty() {
@@ -84,29 +107,43 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
-            // Header: PORT, PROCESS, PID, MEMORY
+            // Header: PORT, PID, PROCESS, MEMORY
             println!(
-                "{:<6} {:<30} {:<8} {}",
-                "PORT".bold().underline(),
-                "PROCESS".bold().underline(),
-                "PID".bold().underline(),
-                "MEMORY".bold().underline()
+                "{:>6}  {:>8}  {:<30}  {:>10}",
+                "PORT".bold(),
+                "PID".bold(),
+                "PROCESS".bold(),
+                "MEMORY".bold()
             );
-            println!("{}", "─".repeat(65).bright_black());
+            println!("{}", "─".repeat(60).bright_black());
 
             for p in ports {
+                // 1. Process Colors
                 let process_colored = if p.process.contains("[docker]") {
                     p.process.magenta()
+                } else if kill::is_system_critical(&p.process) {
+                    p.process.red()
                 } else {
-                    p.process.white()
+                    p.process.green() // "Safe to kill" vibe
                 };
 
+                // 2. Memory Colors (Contrast)
+                const FIFTY_MB: u64 = 50 * 1024 * 1024;
+                let mem_colored = if p.memory_bytes == 0 {
+                    "0 B".bright_black()
+                } else if p.memory_bytes > FIFTY_MB {
+                    format_memory(p.memory_bytes).bright_green().bold() // Big memory pops
+                } else {
+                    format_memory(p.memory_bytes).white() // Small memory is neutral
+                };
+
+                // 3. Print Row
                 println!(
-                    "{:<6} {:<30} {:<8} {}",
-                    p.port.to_string().bright_cyan(),
-                    process_colored,
+                    "{:>6}  {:>8}  {:<30}  {:>10}",
+                    p.port.to_string().cyan(), // Standard cyan
                     p.pid.to_string().yellow(),
-                    format_memory(p.memory_bytes).green()
+                    process_colored,
+                    mem_colored
                 );
             }
         }
@@ -121,8 +158,8 @@ fn main() -> Result<()> {
                 println!("Port {} is free (no process listening).", port);
             }
         },
-        Commands::Kill { port, force } => {
-            kill::kill_port(port, force)?;
+        Commands::Kill { port, name, force } => {
+            kill::kill_process(port, name, force)?;
         }
         Commands::Check { port } => {
             let taken = scan::find_port(port)?.is_some();
@@ -138,6 +175,34 @@ fn main() -> Result<()> {
         }
         Commands::Completions { shell } => {
             completions::generate_completions(shell)?;
+        }
+        Commands::Export { format } => {
+            let ports = scan::scan_listening_ports()?;
+            if ports.is_empty() {
+                // In a script, empty output is better than an error message
+                return Ok(()); 
+            }
+
+            match format {
+                ExportFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&ports)?);
+                }
+                ExportFormat::Csv => {
+                    let mut wtr = csv::Writer::from_writer(std::io::stdout());
+                    // Write the header first
+                    wtr.write_record(&["port", "pid", "process", "memory_bytes"])?;
+                    // Then loop through the data
+                    for p in &ports {
+                        wtr.write_record(&[
+                            p.port.to_string(),
+                            p.pid.to_string(),
+                            p.process.clone(),
+                            p.memory_bytes.to_string(),
+                        ])?;
+                    }
+                    wtr.flush()?;
+                }
+            }
         }
     }
 

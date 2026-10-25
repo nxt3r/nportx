@@ -2,8 +2,9 @@ use anyhow::Result;
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo};
 use std::collections::HashMap;
 use sysinfo::{Pid, System};
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PortEntry {
     pub port: u16,
     pub pid: u32,
